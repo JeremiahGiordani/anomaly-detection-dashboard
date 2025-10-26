@@ -107,7 +107,7 @@ export default function Quadrant2LossChart() {
   }, [hasData, time, avgLoss, visibleIdx]);
 
   // 95th percentile threshold on the visible subset
-  const threshold = useMemo(() => percentile(vis.y, 0.95), [vis.y]);
+  const threshold = useMemo(() => percentile(vis.y, 0.90), [vis.y]);
 
   // Partition points into below / above threshold
   const dots = useMemo(() => {

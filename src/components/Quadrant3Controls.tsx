@@ -30,7 +30,7 @@ export default function Quadrant3ControlPanel() {
         const domain = { min: 0, max: Math.max(0, len - 1) };
         setTimeDomain(domain);
         setTimeRange?.(domain);
-        setCurrentTime?.(Math.floor((domain.min + domain.max) / 2));
+        setCurrentTime?.(0);
       })
       .catch(console.error);
   }, []);

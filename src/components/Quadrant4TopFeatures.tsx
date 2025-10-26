@@ -31,13 +31,11 @@ export default function Quadrant4TopFeatures() {
     const fullRange = { min: 0, max: time.length - 1 };
     const visible = timeRange ?? fullRange;
 
-    // If a currentTime exists, clamp it to the visible window
     if (currentTime != null) {
       const idx = Math.max(visible.min, Math.min(currentTime, visible.max));
       return { mode: "timepoint" as const, idx, range: visible };
     }
 
-    // No selection → average over visible window
     const start = Math.max(fullRange.min, visible.min);
     const end = Math.min(fullRange.max, visible.max);
     return { mode: "average" as const, idx: null, range: { min: start, max: end } };
@@ -48,8 +46,6 @@ export default function Quadrant4TopFeatures() {
     if (!selection || losses.length === 0) return null;
 
     const F = losses.length;
-
-    // Compute contribution per feature
     const rows = new Array<{ name: string; val: number }>(F);
 
     if (selection.mode === "timepoint" && selection.idx != null) {
@@ -70,19 +66,13 @@ export default function Quadrant4TopFeatures() {
       }
     }
 
-    // Sort descending
+    // Sort desc and take Top-N ONLY (no "Other")
     rows.sort((a, b) => b.val - a.val);
-
-    // Top-N and "Other"
     const k = Math.max(1, Math.min(topN, rows.length));
     const top = rows.slice(0, k);
-    const rest = rows.slice(k);
 
-    const sumTop = top.reduce((acc, r) => acc + r.val, 0);
-    const sumRest = rest.reduce((acc, r) => acc + r.val, 0);
-    const total = sumTop + sumRest;
-
-    if (total <= 0) {
+    const totalTop = top.reduce((acc, r) => acc + r.val, 0);
+    if (totalTop <= 0) {
       return {
         labels: ["No signal"],
         values: [1],
@@ -93,16 +83,12 @@ export default function Quadrant4TopFeatures() {
 
     const labels = top.map((r) => r.name);
     const values = top.map((r) => r.val);
-    if (sumRest > 0) {
-      labels.push("Other");
-      values.push(sumRest);
-    }
 
     return {
       labels,
       values,
       meta: selection,
-      total,
+      total: totalTop, // (percentages will be relative to Top-N automatically)
     };
   }, [selection, losses, features, topN]);
 

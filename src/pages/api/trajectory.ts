@@ -1,47 +1,50 @@
+// src/pages/api/trajectory.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 
 /**
- * Mock flight trajectory: 300 points forming a complex climb, turn, and descent.
- * - Starts near Austin, TX (30°N, -97°W)
- * - Climb phase: alt from 1,000 → 30,000 ft
- * - Cruise: wide right-hand turn (0.5° radius)
- * - Descent: spiral down back toward start point
+ * Mock realistic flight trajectory for 300 time steps.
+ * - Starts on ground (alt = 0)
+ * - Takes off and climbs in a curved ascent
+ * - Cruises with altitude oscillations and gentle heading changes
+ * - Makes a wide banked turn
+ * - Descends and lands near starting point
  */
 export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const points = 300;
-  const climbEnd = 80;
-  const cruiseEnd = 180;
-  const baseLat = 30.0;
-  const baseLon = -97.0;
+  const N = 300;
+  const lat0 = 30.0;
+  const lon0 = -97.0;
 
-  const data = Array.from({ length: points }, (_, i) => {
-    let lat = baseLat;
-    let lon = baseLon;
-    let alt = 1000;
+  const data = Array.from({ length: N }, (_, i) => {
+    const t = i;
+    const x = i / (N - 1);
 
-    if (i < climbEnd) {
-      // climb straight east
-      lat += i * 0.002;
-      lon += i * 0.003;
-      alt = 1000 + (i / climbEnd) * 29000;
-    } else if (i < cruiseEnd) {
-      // gentle right turn (northward arc)
-      const t = (i - climbEnd) / (cruiseEnd - climbEnd);
-      const angle = t * Math.PI; // 180° arc
-      lat = baseLat + 0.25 * Math.sin(angle);
-      lon = baseLon + 0.25 * (1 - Math.cos(angle));
-      alt = 30000 + Math.sin(t * 4 * Math.PI) * 500; // small oscillation
+    // Altitude profile
+    let alt: number;
+    if (x < 0.15) {
+      // takeoff and climb
+      alt = 10000 * Math.sin((Math.PI / 2) * (x / 0.15));
+    } else if (x < 0.8) {
+      // cruise with small oscillations
+      alt = 10000 + Math.sin(x * 8 * Math.PI) * 700;
     } else {
-      // descending spiral toward origin
-      const t = (i - cruiseEnd) / (points - cruiseEnd);
-      const angle = 4 * Math.PI * t;
-      const radius = 0.25 * (1 - t);
-      lat = baseLat + radius * Math.cos(angle);
-      lon = baseLon + radius * Math.sin(angle);
-      alt = 30000 - t * 29000;
+      // descent and landing
+      const descentProgress = (x - 0.8) / 0.2;
+      alt = 10000 * Math.cos((Math.PI / 2) * descentProgress);
+      if (alt < 0) alt = 0;
     }
 
-    return { t: i, lat, lon, alt };
+    // Horizontal path (combination of turns, offsets, and oscillations)
+    // Adds realistic variation — not a perfect loop
+    const lat = lat0
+      + 0.2 * Math.sin(x * 2 * Math.PI)
+      + 0.05 * Math.sin(x * 10 * Math.PI); // small turbulence-like wiggle
+
+    const lon = lon0
+      + 0.4 * Math.sin(x * Math.PI)     // gradual eastward drift
+      + 0.2 * Math.sin(x * 3 * Math.PI) // big right-hand banked turn
+      - 0.1 * Math.sin(x * 12 * Math.PI); // smaller high-frequency wobble
+
+    return { t, lat, lon, alt };
   });
 
   res.status(200).json(data);
