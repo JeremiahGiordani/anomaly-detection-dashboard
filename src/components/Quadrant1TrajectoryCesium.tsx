@@ -27,18 +27,18 @@ export default function Quadrant1TrajectoryCesium() {
   const [Cesium, setCesium] = useState<CesiumNS | null>(null);
   const [traj, setTraj] = useState<TrajPt[]>([]);
   const [viewer, setViewer] = useState<any>(null);
-  const didSetInitialView = useRef(false);
+  const didFlyHome = useRef(false);
 
-  // Load Cesium (client only). We don't use any Ion helpers.
+  // Load Cesium (client only). We don't use Ion helpers.
   useEffect(() => {
     (async () => {
       const C = await import("cesium");
-      C.Ion.defaultAccessToken = ""; // ensure no token is used
+      C.Ion.defaultAccessToken = ""; // ensure no Ion token
       setCesium(C);
     })();
   }, []);
 
-  // Fetch trajectory
+  // Fetch trajectory (mock API)
   useEffect(() => {
     fetch("/api/trajectory")
       .then((r) => r.json())
@@ -46,24 +46,13 @@ export default function Quadrant1TrajectoryCesium() {
       .catch(console.error);
   }, []);
 
-  // Imagery & terrain providers passed directly to <Viewer> (prevents Ion defaults)
+  // Providers passed directly to Viewer (prevents defaults)
   const { imageryProvider, terrainProvider } = useMemo(() => {
     if (!Cesium) return { imageryProvider: undefined, terrainProvider: undefined };
-
-    // Option A: OSM (default)
     const imagery = new Cesium.OpenStreetMapImageryProvider({
       url: "https://tile.openstreetmap.org/",
       credit: "© OpenStreetMap contributors",
     });
-
-    // Option B: Esri (swap if you prefer)
-    // const imagery = new Cesium.UrlTemplateImageryProvider({
-    //   url: "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    //   credit: "Esri World Imagery",
-    //   tilingScheme: new Cesium.WebMercatorTilingScheme(),
-    //   maximumLevel: 19,
-    // });
-
     const terrain = new Cesium.EllipsoidTerrainProvider();
     return { imageryProvider: imagery, terrainProvider: terrain };
   }, [Cesium]);
@@ -95,27 +84,67 @@ export default function Quadrant1TrajectoryCesium() {
     return Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.alt * FT_TO_M);
   }, [Cesium, traj, currentTime, timeRange, altRange]);
 
-  // Set the initial camera view exactly once when positions are available.
-  useEffect(() => {
-    if (!Cesium || !viewer) return;
-    if (didSetInitialView.current) return;
+  // --- Compute a HOME rectangle from trajectory extents (with padding) ---
+  const homeRectangle = useMemo(() => {
+    if (!Cesium) return null;
+    const src = filtered.length ? filtered : traj;
+    if (!src.length) return null;
 
-    if (positions.length > 0) {
-      const bs = Cesium.BoundingSphere.fromPoints(positions);
-      // Set view (no animation) so it doesn't move afterward unless the user does it.
-      viewer.camera.setView({ destination: bs.center, orientation: { heading: 0, pitch: -Math.PI / 2, roll: 0 } });
-      // Pad out to see the whole path
-      viewer.camera.flyToBoundingSphere(bs, { duration: 0.0 });
-      didSetInitialView.current = true;
-    } else {
-      // Fallback to a global view
-      viewer.camera.setView({
-        destination: Cesium.Cartesian3.fromDegrees(-95, 38, 2.2e7),
-      });
-      didSetInitialView.current = true;
+    // Lat bounds
+    let minLat = Infinity, maxLat = -Infinity;
+    for (const p of src) {
+      if (p.lat < minLat) minLat = p.lat;
+      if (p.lat > maxLat) maxLat = p.lat;
     }
-    viewer.scene.requestRender?.();
-  }, [Cesium, viewer, positions]);
+    // Lon bounds – handle anti-meridian robustly
+    const lons = src.map(p => {
+      // normalize to [-180, 180]
+      let lon = p.lon;
+      while (lon <= -180) lon += 360;
+      while (lon > 180) lon -= 360;
+      return lon;
+    });
+    let minLon = Math.min(...lons);
+    let maxLon = Math.max(...lons);
+    // If span > 180, re-map to [0,360) to avoid crossing
+    if (maxLon - minLon > 180) {
+      const lons360 = lons.map(l => (l < 0 ? l + 360 : l));
+      minLon = Math.min(...lons360);
+      maxLon = Math.max(...lons360);
+      // map back to [-180,180] domain
+      minLon = (minLon > 180 ? minLon - 360 : minLon);
+      maxLon = (maxLon > 180 ? maxLon - 360 : maxLon);
+      if (minLon > maxLon) [minLon, maxLon] = [maxLon, minLon];
+    }
+
+    // Padding (min 0.05°) – about ~5–10 km depending on lat
+    const latPad = Math.max(0.05, (maxLat - minLat) * 0.15);
+    const lonPad = Math.max(0.05, (maxLon - minLon) * 0.15);
+
+    const west  = Math.max(-180, minLon - lonPad);
+    const east  = Math.min( 180, maxLon + lonPad);
+    const south = Math.max( -90, minLat - latPad);
+    const north = Math.min(  90, maxLat + latPad);
+
+    return Cesium.Rectangle.fromDegrees(west, south, east, north);
+  }, [Cesium, filtered, traj]);
+
+  // Fly once to the HOME rectangle on first availability
+  useEffect(() => {
+    if (!Cesium || !viewer || didFlyHome.current) return;
+    if (!homeRectangle) return;
+
+    try {
+      viewer.camera.flyTo({
+        destination: homeRectangle,
+        duration: 2.0,
+      });
+      didFlyHome.current = true;
+      viewer.scene.requestRender?.();
+    } catch {
+      // ignore
+    }
+  }, [Cesium, viewer, homeRectangle]);
 
   if (!Cesium) return <div className="text-gray-600">Loading globe…</div>;
 
@@ -125,7 +154,6 @@ export default function Quadrant1TrajectoryCesium() {
         imageryProvider={imageryProvider as any}
         terrainProvider={terrainProvider as any}
         style={{ width: "100%", height: "100%" }}
-        // Keep rendering continuous so imagery appears without interaction
         timeline={false}
         animation={false}
         baseLayerPicker={false}
@@ -138,7 +166,7 @@ export default function Quadrant1TrajectoryCesium() {
         onReady={(v: any) => {
           setViewer(v);
           try {
-            v.scene.requestRenderMode = false;
+            v.scene.requestRenderMode = false; // continuous render
             v.scene.globe.show = true;
             v.scene.skyAtmosphere.show = false;
             v.scene.skyBox = undefined;
@@ -150,7 +178,6 @@ export default function Quadrant1TrajectoryCesium() {
           } catch {}
         }}
       >
-        {/* Explicit imagery layer (optional redundancy) */}
         {imageryProvider && <ImageryLayer imageryProvider={imageryProvider as any} />}
 
         {/* Trajectory polyline */}
@@ -166,7 +193,7 @@ export default function Quadrant1TrajectoryCesium() {
           </Entity>
         )}
 
-        {/* Selected timepoint marker */}
+        {/* Selected point */}
         {selectedCartesian && (
           <Entity position={selectedCartesian}>
             <PointGraphics
