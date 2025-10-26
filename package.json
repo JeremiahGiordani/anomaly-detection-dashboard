@@ -6,16 +6,20 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "postinstall": "node scripts/copy-cesium.js"
   },
   "dependencies": {
+    "@zip.js/zip.js": "2.7.20",
     "autoprefixer": "^10.4.19",
+    "cesium": "^1.120.0",
     "next": "14.2.5",
     "plotly.js": "^3.1.2",
     "postcss": "^8.4.39",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-plotly.js": "^2.6.0",
+    "resium": "^1.16.2",
     "tailwindcss": "^3.4.10"
   },
   "devDependencies": {
